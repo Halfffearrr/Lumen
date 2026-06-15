@@ -12,6 +12,9 @@ members = [
     "crates/lumen-common",
     "crates/lumen-lexer",
     "crates/lumen-parser",
+    "crates/lumen-compiler",
+    "crates/lumen-vm",
+    "crates/lumen-cli",
 ]
 
 # Settings shared by every crate, inherited via `*.workspace = true`.
@@ -26,4 +29,7 @@ rust-version = "1.94"
 lumen-common = { path = "crates/lumen-common" }
 lumen-lexer = { path = "crates/lumen-lexer" }
 lumen-parser = { path = "crates/lumen-parser" }
+lumen-compiler = { path = "crates/lumen-compiler" }
+lumen-vm = { path = "crates/lumen-vm" }
+lumen-cli = { path = "crates/lumen-cli" }
 thiserror = "2"

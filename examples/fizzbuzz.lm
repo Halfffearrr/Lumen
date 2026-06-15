@@ -1,0 +1,13 @@
+// FizzBuzz — the canonical stage-3 demo: ranges, for-loops, if/else-if chains,
+// the `%` operator and `print`. Run it with:  lumen examples/fizzbuzz.lm
+for i in 1..=15 {
+    if i % 15 == 0 {
+        print("FizzBuzz")
+    } else if i % 3 == 0 {
+        print("Fizz")
+    } else if i % 5 == 0 {
+        print("Buzz")
+    } else {
+        print(i)
+    }
+}

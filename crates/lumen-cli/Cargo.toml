@@ -1,0 +1,17 @@
+[package]
+name = "lumen-cli"
+description = "Lumen command-line entry point: run a script or disassemble its bytecode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "lumen"
+path = "src/main.rs"
+
+[dependencies]
+lumen-lexer.workspace = true
+lumen-parser.workspace = true
+lumen-compiler.workspace = true
+lumen-vm.workspace = true

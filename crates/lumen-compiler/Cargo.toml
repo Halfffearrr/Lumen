@@ -1,0 +1,16 @@
+[package]
+name = "lumen-compiler"
+description = "Lumen stage 3: lowers the AST to stack-machine bytecode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lumen-common.workspace = true
+lumen-parser.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# Tests drive the full front end (source -> tokens -> AST) before compiling.
+lumen-lexer.workspace = true
