@@ -81,6 +81,85 @@ impl Span {
     }
 }
 
+/// A uniform interface implemented by every stage's error type (lex, parse,
+/// resolve, runtime). It lets the CLI render all of them with a single routine
+/// that draws a caret under [`Diagnostic::span`] and prints
+/// [`Diagnostic::message`] — the foundation of Lumen's friendly errors.
+pub trait Diagnostic {
+    /// Where in the source the problem is, so a caret can be drawn.
+    fn span(&self) -> Span;
+    /// A short, location-free description (the renderer adds the location).
+    fn message(&self) -> String;
+}
+
+/// The signature of a built-in (native) function.
+///
+/// This lives in `lumen-common` so the resolver (which seeds the global scope
+/// and checks call arity) and the VM (which registers the implementations) share
+/// one source of truth without a crate dependency cycle.
+pub struct Builtin {
+    pub name: &'static str,
+    /// Fixed parameter count, or `None` if variadic (arity is not checked).
+    pub arity: Option<usize>,
+}
+
+/// Every built-in function Lumen exposes as a global. The VM must provide an
+/// implementation for each name in this table.
+pub const BUILTINS: &[Builtin] = &[
+    Builtin {
+        name: "print",
+        arity: None,
+    },
+    Builtin {
+        name: "len",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "type",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "str",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "sqrt",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "abs",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "floor",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "push",
+        arity: Some(2),
+    },
+    Builtin {
+        name: "pop",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "keys",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "values",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "error",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "clock",
+        arity: Some(0),
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

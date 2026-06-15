@@ -21,20 +21,36 @@ use crate::token::{StrPart, Token, TokenKind};
 /// can underline the exact offending location in the source.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum LexError {
-    #[error("unexpected character '{ch}' at line {}, column {}", .span.line, .span.col)]
+    #[error("unexpected character '{ch}'")]
     UnexpectedChar { ch: char, span: Span },
 
-    #[error("unterminated string starting at line {}, column {}", .span.line, .span.col)]
+    #[error("unterminated string")]
     UnterminatedString { span: Span },
 
-    #[error("unterminated interpolation: missing '}}' at line {}, column {}", .span.line, .span.col)]
+    #[error("unterminated interpolation: missing '}}'")]
     UnterminatedInterpolation { span: Span },
 
-    #[error("invalid escape sequence '\\{ch}' at line {}, column {}", .span.line, .span.col)]
+    #[error("invalid escape sequence '\\{ch}'")]
     InvalidEscape { ch: char, span: Span },
 
-    #[error("number '{lexeme}' is out of range at line {}, column {}", .span.line, .span.col)]
+    #[error("number '{lexeme}' is out of range")]
     NumberOutOfRange { lexeme: String, span: Span },
+}
+
+impl lumen_common::Diagnostic for LexError {
+    fn span(&self) -> Span {
+        match self {
+            LexError::UnexpectedChar { span, .. }
+            | LexError::UnterminatedString { span }
+            | LexError::UnterminatedInterpolation { span }
+            | LexError::InvalidEscape { span, .. }
+            | LexError::NumberOutOfRange { span, .. } => *span,
+        }
+    }
+
+    fn message(&self) -> String {
+        self.to_string()
+    }
 }
 
 /// Scans one `&str` of Lumen source into tokens.

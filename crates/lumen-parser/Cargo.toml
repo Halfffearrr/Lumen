@@ -1,0 +1,12 @@
+[package]
+name = "lumen-parser"
+description = "Lumen stage 2: tokens -> AST (recursive descent + Pratt) and a static-check resolver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lumen-common.workspace = true
+lumen-lexer.workspace = true
+thiserror.workspace = true

@@ -11,6 +11,7 @@ resolver = "2"
 members = [
     "crates/lumen-common",
     "crates/lumen-lexer",
+    "crates/lumen-parser",
 ]
 
 # Settings shared by every crate, inherited via `*.workspace = true`.
@@ -23,4 +24,6 @@ rust-version = "1.94"
 # Dependency versions are pinned once here so all crates stay in sync.
 [workspace.dependencies]
 lumen-common = { path = "crates/lumen-common" }
+lumen-lexer = { path = "crates/lumen-lexer" }
+lumen-parser = { path = "crates/lumen-parser" }
 thiserror = "2"

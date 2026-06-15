@@ -15,6 +15,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumen-parser"
+version = "0.1.0"
+dependencies = [
+ "lumen-common",
+ "lumen-lexer",
+ "thiserror",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
