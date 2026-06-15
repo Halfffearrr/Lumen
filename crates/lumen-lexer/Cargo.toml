@@ -1,0 +1,11 @@
+[package]
+name = "lumen-lexer"
+description = "Lumen stage 1: scans source text into a stream of tokens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lumen-common.workspace = true
+thiserror.workspace = true

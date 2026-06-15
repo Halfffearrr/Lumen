@@ -1,0 +1,26 @@
+# Lumen workspace root.
+#
+# Lumen is a small dynamically-typed scripting language implemented in Rust as a
+# bytecode virtual machine. The project is split into focused crates so that each
+# stage of the pipeline (lex -> parse -> compile -> run) has a clear owner.
+#
+# Members are added stage by stage. Stage 1 ships `lumen-common` (shared source
+# locations / errors) and `lumen-lexer` (source text -> tokens).
+[workspace]
+resolver = "2"
+members = [
+    "crates/lumen-common",
+    "crates/lumen-lexer",
+]
+
+# Settings shared by every crate, inherited via `*.workspace = true`.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.94"
+
+# Dependency versions are pinned once here so all crates stay in sync.
+[workspace.dependencies]
+lumen-common = { path = "crates/lumen-common" }
+thiserror = "2"

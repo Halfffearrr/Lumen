@@ -1,0 +1,5 @@
+# Pin the toolchain so the grader builds Lumen with the exact compiler we used.
+# rustup reads this file automatically and switches to the named version.
+[toolchain]
+channel = "1.94.0"
+components = ["rustfmt", "clippy"]

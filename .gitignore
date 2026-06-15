@@ -1,0 +1,9 @@
+# Rust build output.
+/target
+
+# Editor / OS noise.
+**/*.rs.bk
+.DS_Store
+
+# Cargo.lock IS committed on purpose: Lumen ships a binary (the `lumen` CLI),
+# so a locked dependency set makes the grader's build reproducible.

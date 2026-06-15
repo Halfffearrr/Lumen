@@ -1,0 +1,9 @@
+[package]
+name = "lumen-common"
+description = "Shared source-location and error types for the Lumen language"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
