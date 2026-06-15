@@ -77,6 +77,31 @@ pub fn compile(program: &Program) -> Result<Chunk, CompileError> {
     Ok(c.chunk)
 }
 
+/// Compile a program for the REPL: identical to [`compile`], except that if the
+/// final statement is a bare expression its value is *kept* (not discarded) and
+/// becomes the program's result, so the REPL can echo it.
+pub fn compile_repl(program: &Program) -> Result<Chunk, CompileError> {
+    let mut c = Compiler::new();
+    if let Some((last, init)) = program.split_last() {
+        for s in init {
+            c.stmt(s)?;
+        }
+        match last {
+            // Keep the trailing expression's value as the result.
+            Stmt::Expr(e) => c.expr(e)?,
+            other => {
+                c.stmt(other)?;
+                c.emit(Instr::Nil, other.span().line);
+            }
+        }
+    } else {
+        c.emit(Instr::Nil, 1);
+    }
+    let last_line = c.chunk.lines.last().copied().unwrap_or(1);
+    c.emit(Instr::Return, last_line);
+    Ok(c.chunk)
+}
+
 /// A local variable, tracked at compile time. `slot` is the value's absolute
 /// position on the stack (with no call frames in stage 3, the frame base is 0).
 ///

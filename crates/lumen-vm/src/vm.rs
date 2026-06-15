@@ -117,6 +117,13 @@ impl Vm {
         }
     }
 
+    /// The names of every global currently bound (built-ins plus anything the
+    /// program has defined). Used by the REPL to seed the resolver so references
+    /// to globals from earlier lines are not flagged as undefined.
+    pub fn global_names(&self) -> Vec<String> {
+        self.globals.keys().cloned().collect()
+    }
+
     // --- stack helpers -------------------------------------------------------
 
     fn push(&mut self, v: Value) {
@@ -763,6 +770,10 @@ fn builtin_fn(name: &str) -> crate::value::NativeFn {
         "values" => bi_values,
         "error" => bi_error,
         "clock" => bi_clock,
+        "min" => bi_min,
+        "max" => bi_max,
+        "int" => bi_int,
+        "float" => bi_float,
         other => unreachable!("no implementation for built-in '{other}'"),
     }
 }
@@ -890,4 +901,50 @@ fn bi_clock(_: &mut Vm, _args: &[Value]) -> Result<Value, RuntimeError> {
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0);
     Ok(Value::Float(secs))
+}
+
+fn bi_min(_: &mut Vm, args: &[Value]) -> Result<Value, RuntimeError> {
+    match compare(args[0].clone(), args[1].clone(), "<")? {
+        Value::Bool(true) => Ok(args[0].clone()),
+        _ => Ok(args[1].clone()),
+    }
+}
+
+fn bi_max(_: &mut Vm, args: &[Value]) -> Result<Value, RuntimeError> {
+    match compare(args[0].clone(), args[1].clone(), ">")? {
+        Value::Bool(true) => Ok(args[0].clone()),
+        _ => Ok(args[1].clone()),
+    }
+}
+
+fn bi_int(_: &mut Vm, args: &[Value]) -> Result<Value, RuntimeError> {
+    match &args[0] {
+        Value::Int(n) => Ok(Value::Int(*n)),
+        Value::Float(x) => Ok(Value::Int(*x as i64)),
+        Value::Str(s) => s
+            .trim()
+            .parse::<i64>()
+            .map(Value::Int)
+            .map_err(|_| RuntimeError::new(format!("cannot convert {s:?} to int"))),
+        other => Err(RuntimeError::new(format!(
+            "int() expects a number or string, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn bi_float(_: &mut Vm, args: &[Value]) -> Result<Value, RuntimeError> {
+    match &args[0] {
+        Value::Int(n) => Ok(Value::Float(*n as f64)),
+        Value::Float(x) => Ok(Value::Float(*x)),
+        Value::Str(s) => s
+            .trim()
+            .parse::<f64>()
+            .map(Value::Float)
+            .map_err(|_| RuntimeError::new(format!("cannot convert {s:?} to float"))),
+        other => Err(RuntimeError::new(format!(
+            "float() expects a number or string, got {}",
+            other.type_name()
+        ))),
+    }
 }

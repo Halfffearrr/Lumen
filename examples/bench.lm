@@ -1,0 +1,17 @@
+// A self-timed micro-benchmark (buff3) using the `clock()` built-in, which
+// returns wall-clock seconds. It times naive recursive fib(30) — heavy on
+// function calls and integer arithmetic — so the bytecode VM's call path is
+// what's being measured. Run with:  lumen examples/bench.lm
+
+fn fib(n) {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+let n = 30
+let start = clock()
+let result = fib(n)
+let elapsed = clock() - start
+
+print("fib({n}) = {result}")
+print("elapsed seconds: {elapsed}")

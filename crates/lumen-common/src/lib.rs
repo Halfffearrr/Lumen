@@ -158,6 +158,22 @@ pub const BUILTINS: &[Builtin] = &[
         name: "clock",
         arity: Some(0),
     },
+    Builtin {
+        name: "min",
+        arity: Some(2),
+    },
+    Builtin {
+        name: "max",
+        arity: Some(2),
+    },
+    Builtin {
+        name: "int",
+        arity: Some(1),
+    },
+    Builtin {
+        name: "float",
+        arity: Some(1),
+    },
 ];
 
 #[cfg(test)]

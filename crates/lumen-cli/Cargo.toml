@@ -11,6 +11,7 @@ name = "lumen"
 path = "src/main.rs"
 
 [dependencies]
+lumen-common.workspace = true
 lumen-lexer.workspace = true
 lumen-parser.workspace = true
 lumen-compiler.workspace = true

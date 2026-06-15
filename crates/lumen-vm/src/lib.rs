@@ -261,4 +261,36 @@ print(d["b"])"#),
         let err = interpret(src).unwrap_err();
         assert!(matches!(err, LumenError::Runtime(e) if e.message.contains("argument")));
     }
+
+    #[test]
+    fn mutual_recursion_resolves_by_hoisting() {
+        // `is_even` references `is_odd`, declared later — allowed by hoisting.
+        let src = "fn is_even(n) { if n == 0 { return true }\n return is_odd(n - 1) }\nfn is_odd(n) { if n == 0 { return false }\n return is_even(n - 1) }\nprint(is_even(10))";
+        assert_eq!(out(src), "true\n");
+    }
+
+    // ---- stage 5: extended standard library & REPL ----
+
+    #[test]
+    fn extended_builtins() {
+        assert_eq!(out("print(min(3, 9))"), "3\n");
+        assert_eq!(out("print(max(3, 9))"), "9\n");
+        assert_eq!(out("print(int(3.9))"), "3\n");
+        assert_eq!(out("print(float(2))"), "2.0\n");
+        assert_eq!(out(r#"print(int("42") + 1)"#), "43\n");
+    }
+
+    #[test]
+    fn repl_compilation_echoes_the_last_expression() {
+        use lumen_compiler::compile_repl;
+        use lumen_lexer::tokenize;
+        use lumen_parser::{parse, resolve};
+
+        let program = parse(tokenize("40 + 2").unwrap()).unwrap();
+        resolve(&program).unwrap();
+        let chunk = compile_repl(&program).unwrap();
+        let mut vm = Vm::new();
+        // Unlike `compile`, the REPL form returns the trailing expression's value.
+        assert!(matches!(vm.run(chunk).unwrap(), Value::Int(42)));
+    }
 }

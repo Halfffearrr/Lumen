@@ -20,7 +20,7 @@ mod parser;
 mod resolver;
 
 pub use parser::{parse, ParseError, Parser};
-pub use resolver::{resolve, ResolveError};
+pub use resolver::{resolve, resolve_with_globals, ResolveError};
 
 #[cfg(test)]
 mod tests {

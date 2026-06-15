@@ -20,7 +20,7 @@ mod disasm;
 pub mod opcode;
 
 pub use chunk::{Chunk, Constant, FnProto, UpvalueDesc};
-pub use compiler::{compile, CompileError};
+pub use compiler::{compile, compile_repl, CompileError};
 pub use disasm::{disassemble, disassemble_instr};
 pub use opcode::Instr;
 

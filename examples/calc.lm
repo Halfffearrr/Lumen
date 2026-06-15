@@ -1,0 +1,99 @@
+// A tiny arithmetic calculator written in Lumen itself (buff7: a step toward
+// self-hosting). It is a recursive-descent parser/evaluator for `+ - * /` and
+// parentheses with the usual precedence, working directly on the source string.
+//
+// It exercises a lot of the language at once: mutually-recursive functions
+// (expr -> term -> factor -> expr), string indexing and comparison, the
+// int()/float() built-ins, and mutable global state for the cursor.
+// Run with:  lumen examples/calc.lm
+
+let mut src = ""
+let mut pos = 0
+
+fn peek() {
+    if pos < len(src) { return src[pos] }
+    return ""
+}
+
+fn advance() {
+    let c = peek()
+    pos = pos + 1
+    return c
+}
+
+fn skip_spaces() {
+    while peek() == " " { advance() }
+}
+
+fn is_digit(c) {
+    return c >= "0" && c <= "9"
+}
+
+// number := digit+ ( '.' digit+ )?
+fn number() {
+    let mut s = ""
+    while is_digit(peek()) { s = s + advance() }
+    if peek() == "." {
+        s = s + advance()
+        while is_digit(peek()) { s = s + advance() }
+        return float(s)
+    }
+    return int(s)
+}
+
+// factor := number | '(' expr ')'
+fn factor() {
+    skip_spaces()
+    if peek() == "(" {
+        advance()              // consume '('
+        let v = expr()
+        skip_spaces()
+        advance()              // consume ')'
+        return v
+    }
+    return number()
+}
+
+// term := factor ( ('*' | '/') factor )*
+fn term() {
+    let mut v = factor()
+    skip_spaces()
+    while peek() == "*" || peek() == "/" {
+        let op = advance()
+        let rhs = factor()
+        if op == "*" { v = v * rhs } else { v = v / rhs }
+        skip_spaces()
+    }
+    return v
+}
+
+// expr := term ( ('+' | '-') term )*
+fn expr() {
+    let mut v = term()
+    skip_spaces()
+    while peek() == "+" || peek() == "-" {
+        let op = advance()
+        let rhs = term()
+        if op == "+" { v = v + rhs } else { v = v - rhs }
+        skip_spaces()
+    }
+    return v
+}
+
+fn calc(s) {
+    src = s
+    pos = 0
+    return expr()
+}
+
+let a = calc("2 + 3 * 4")
+let b = calc("(2 + 3) * 4")
+let c = calc("10 / 2 - 1")
+let d = calc("2 * (3 + 4) - 5")
+let e = calc("100 / (2 + 3) / 2")
+
+print("2 + 3 * 4         = {a}")    // 14
+print("(2 + 3) * 4       = {b}")    // 20
+print("10 / 2 - 1        = {c}")    // 4
+print("2 * (3 + 4) - 5   = {d}")    // 9
+print("100 / (2 + 3) / 2 = {e}")    // 10

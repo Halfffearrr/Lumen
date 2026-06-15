@@ -60,8 +60,30 @@ struct Binding {
 
 /// Resolve a whole program, returning all errors found (empty `Ok` on success).
 pub fn resolve(program: &Program) -> Result<(), Vec<ResolveError>> {
+    resolve_with_globals(program, &[])
+}
+
+/// Resolve a program as if `predefined` global names were already in scope.
+///
+/// This supports the REPL: globals bound by earlier lines are not present in the
+/// current line's AST, so they are seeded here (as mutable, arity-unknown) to
+/// avoid spurious "undefined variable" errors. Arity is left unchecked for them;
+/// the VM still checks it at call time.
+pub fn resolve_with_globals(
+    program: &Program,
+    predefined: &[String],
+) -> Result<(), Vec<ResolveError>> {
     let mut r = Resolver::new();
     r.begin_scope(); // the global scope, on top of the built-ins scope
+    for name in predefined {
+        r.define(
+            name,
+            Binding {
+                is_mutable: true,
+                arity: None,
+            },
+        );
+    }
     r.resolve_block_stmts(program);
     r.end_scope();
     if r.errors.is_empty() {
@@ -124,6 +146,22 @@ impl Resolver {
     // ----------------------------------------------------------------- walk
 
     fn resolve_block_stmts(&mut self, stmts: &[Stmt]) {
+        // Hoist function declarations: bind every `fn` name in this scope before
+        // resolving any bodies, so functions can refer to one another regardless
+        // of order (mutual recursion, e.g. a recursive-descent parser).
+        for stmt in stmts {
+            if let Stmt::Function(func) = stmt {
+                if let Some(name) = &func.name {
+                    self.define(
+                        name,
+                        Binding {
+                            is_mutable: false,
+                            arity: Some(func.params.len()),
+                        },
+                    );
+                }
+            }
+        }
         for stmt in stmts {
             self.resolve_stmt(stmt);
         }
