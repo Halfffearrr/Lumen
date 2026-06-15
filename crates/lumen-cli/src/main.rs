@@ -6,25 +6,28 @@
 //! ```text
 //! lumen <script.lm>                 # compile and run, printing its output
 //! lumen --disassemble <script.lm>   # print the compiled bytecode (buff8)
+//! lumen --gc-demo                   # demonstrate the concurrent mark-sweep GC
 //! ```
 //!
 //! The richer front end (a `clap` argument parser, a `rustyline` REPL, and
 //! `ariadne` source-highlighted errors) is stage 5; this is the thin shell that
-//! makes the stage-3 pipeline runnable end to end.
+//! makes the pipeline runnable end to end.
 
 use std::process::ExitCode;
 
 use lumen_compiler::{compile, disassemble};
 use lumen_lexer::tokenize;
 use lumen_parser::{parse, resolve};
+use lumen_vm::gc::Collector;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.as_slice() {
         [flag, path] if flag == "--disassemble" || flag == "-d" => disassemble_file(path),
+        [flag] if flag == "--gc-demo" => gc_demo(),
         [path] if !path.starts_with('-') => run_file(path),
         _ => {
-            eprintln!("usage: lumen [--disassemble] <script.lm>");
+            eprintln!("usage: lumen [--disassemble | --gc-demo] <script.lm>");
             return ExitCode::from(64); // EX_USAGE
         }
     };
@@ -68,4 +71,38 @@ fn disassemble_file(path: &str) -> Result<(), String> {
 
 fn read(path: &str) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("cannot read '{path}': {e}"))
+}
+
+/// Build a small object graph — including a rooted chain and an unrooted cycle —
+/// then let the background-thread collector reclaim the unreachable objects.
+fn gc_demo() -> Result<(), String> {
+    let gc = Collector::new();
+    let heap = gc.heap();
+
+    let (rooted, before) = {
+        let mut h = heap.lock().unwrap();
+        // A rooted chain a -> b that must survive.
+        let a = h.alloc(1);
+        let b = h.alloc(2);
+        h.add_root(a);
+        h.add_ref(a, b);
+        // An unrooted cycle c <-> d that reference counting could never free.
+        let c = h.alloc(3);
+        let d = h.alloc(4);
+        h.add_ref(c, d);
+        h.add_ref(d, c);
+        (a, h.live())
+    };
+
+    println!("allocated {before} objects (2 rooted + reachable, 2 in an unreachable cycle)");
+    let stats = gc.collect_now(); // marking + sweeping happen on the GC thread
+    println!(
+        "after concurrent mark-sweep: {} live, {} freed",
+        stats.live, stats.freed
+    );
+    println!(
+        "rooted object still holds value {:?}",
+        heap.lock().unwrap().value(rooted)
+    );
+    Ok(())
 }

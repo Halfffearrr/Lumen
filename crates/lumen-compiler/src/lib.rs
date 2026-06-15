@@ -19,7 +19,7 @@ mod compiler;
 mod disasm;
 pub mod opcode;
 
-pub use chunk::{Chunk, Constant};
+pub use chunk::{Chunk, Constant, FnProto, UpvalueDesc};
 pub use compiler::{compile, CompileError};
 pub use disasm::{disassemble, disassemble_instr};
 pub use opcode::Instr;
@@ -44,7 +44,8 @@ mod tests {
 
     #[test]
     fn arithmetic_lowers_to_postfix_ops() {
-        // 1 + 2 * 3  ==  1, 2, 3, Mul, Add  (multiplication first)
+        // 1 + 2 * 3  ==  1, 2, 3, Mul, Add  (multiplication first). The script
+        // ends with the uniform `Nil; Return` epilogue.
         assert_eq!(
             code("1 + 2 * 3"),
             vec![
@@ -54,6 +55,8 @@ mod tests {
                 Instr::Mul,
                 Instr::Add,
                 Instr::Pop, // expression statement discards its value
+                Instr::Nil, // script epilogue
+                Instr::Return,
             ]
         );
     }
@@ -123,13 +126,19 @@ mod tests {
     #[test]
     fn break_unwinds_and_jumps_forward() {
         let c = code("loop { let a = 1\n break }");
-        // `break` pops the loop-body local `a` before jumping out.
-        let brk = c
-            .iter()
-            .position(|i| matches!(i, Instr::Jump(t) if *t == c.len()));
-        // The forward break jump targets the end of the chunk (after the loop).
+        // `break` pops the loop-body local `a` before jumping forward, past the
+        // loop's backward edge, to its exit.
         assert!(c.contains(&Instr::Pop));
-        assert!(brk.is_some(), "break should emit a forward jump to the end");
+        let has_forward = c
+            .iter()
+            .enumerate()
+            .any(|(pos, i)| matches!(i, Instr::Jump(t) if *t > pos));
+        let has_backward = c
+            .iter()
+            .enumerate()
+            .any(|(pos, i)| matches!(i, Instr::Jump(t) if *t < pos));
+        assert!(has_forward, "break should emit a forward jump");
+        assert!(has_backward, "loop should emit a backward jump");
     }
 
     #[test]
@@ -163,11 +172,57 @@ mod tests {
     }
 
     #[test]
-    fn functions_are_rejected_until_stage_4() {
-        let program = parse(tokenize("fn f() { 1 }").unwrap()).unwrap();
-        // (resolver accepts it; the compiler is what defers functions)
+    fn functions_compile_to_a_proto_constant() {
+        // A `fn` declaration compiles to a Closure over a Function constant, then
+        // binds it as a global.
+        let chunk = chunk_of("fn f(a, b) { return a + b }");
+        assert!(chunk
+            .constants
+            .iter()
+            .any(|c| matches!(c, Constant::Function(p) if p.name == "f" && p.arity == 2)));
+        assert!(chunk.code.iter().any(|i| matches!(i, Instr::Closure(_))));
+        assert!(chunk
+            .code
+            .iter()
+            .any(|i| matches!(i, Instr::DefineGlobal(_))));
+    }
+
+    #[test]
+    fn closures_capture_enclosing_locals_as_upvalues() {
+        // The inner lambda reads `count`, a local of `make`, so it captures it as
+        // an upvalue (from an enclosing local).
+        let chunk = chunk_of("fn make() { let count = 0\n return fn() { count } }");
+        let make = chunk
+            .constants
+            .iter()
+            .find_map(|c| match c {
+                Constant::Function(p) if p.name == "make" => Some(p),
+                _ => None,
+            })
+            .expect("make proto");
+        let inner = make
+            .chunk
+            .constants
+            .iter()
+            .find_map(|c| match c {
+                Constant::Function(p) => Some(p),
+                _ => None,
+            })
+            .expect("inner lambda proto");
+        assert_eq!(inner.upvalues.len(), 1);
+        assert!(inner.upvalues[0].from_enclosing_local);
+        assert!(inner
+            .chunk
+            .code
+            .iter()
+            .any(|i| matches!(i, Instr::GetUpvalue(_))));
+    }
+
+    #[test]
+    fn return_outside_a_function_is_an_error() {
+        let program = parse(tokenize("return 1").unwrap()).unwrap();
         let err = compile(&program).unwrap_err();
-        assert!(matches!(err, CompileError::FunctionsNotYet { .. }));
+        assert!(matches!(err, CompileError::ReturnOutsideFunction { .. }));
     }
 
     #[test]

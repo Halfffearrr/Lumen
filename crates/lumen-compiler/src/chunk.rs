@@ -11,20 +11,53 @@
 //! `code[i]` and `lines[i]` always grow together through [`Chunk::push`], keeping
 //! the two vectors the same length.
 
+use std::rc::Rc;
+
 use crate::opcode::Instr;
+
+/// How one upvalue of a function is captured when its closure is created.
+///
+/// A nested function that refers to a variable of an enclosing function captures
+/// it as an *upvalue*. Each captured variable gets one of these descriptors,
+/// recorded on the [`FnProto`] and read by the VM's `Closure` instruction:
+/// * `from_enclosing_local = true` — capture the **enclosing function's local**
+///   at stack slot `index`.
+/// * `from_enclosing_local = false` — capture the **enclosing function's
+///   upvalue** number `index` (the variable lives even further out).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpvalueDesc {
+    pub index: u16,
+    pub from_enclosing_local: bool,
+}
+
+/// A compiled function: its own bytecode plus the metadata the VM needs to call
+/// it and to build a closure from it. Named functions and anonymous lambdas both
+/// compile to one of these; it is stored in the enclosing chunk's constant pool
+/// and instantiated into a runtime closure by [`Instr::Closure`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnProto {
+    /// For diagnostics / disassembly (`""` for anonymous lambdas).
+    pub name: String,
+    /// Number of parameters; the VM checks this against the argument count.
+    pub arity: usize,
+    pub chunk: Chunk,
+    /// One descriptor per captured variable, in upvalue-index order.
+    pub upvalues: Vec<UpvalueDesc>,
+}
 
 /// A value known at compile time and stored in a chunk's constant pool.
 ///
-/// Only literals that the compiler can materialize ahead of time live here.
-/// `bool` and `nil` are *not* constants — they have dedicated zero-operand
-/// instructions ([`Instr::True`], [`Instr::False`], [`Instr::Nil`]) — which keeps
-/// the pool small and the disassembly readable. (Compiled function prototypes
-/// will join this enum in stage 4.)
+/// Only things the compiler can materialize ahead of time live here: numeric and
+/// string literals, and compiled function prototypes. `bool` and `nil` are *not*
+/// constants — they have dedicated zero-operand instructions ([`Instr::True`],
+/// [`Instr::False`], [`Instr::Nil`]) — which keeps the pool small and the
+/// disassembly readable.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Int(i64),
     Float(f64),
     Str(String),
+    Function(Rc<FnProto>),
 }
 
 /// A compiled chunk of bytecode together with its constant pool and line table.
@@ -62,6 +95,14 @@ impl Chunk {
             return i as u16;
         }
         self.constants.push(value);
+        (self.constants.len() - 1) as u16
+    }
+
+    /// Append a compiled function to the pool and return its index. Functions are
+    /// not de-duplicated (each `fn`/lambda gets its own slot) since comparing
+    /// whole chunks for equality would be wasteful and offers nothing.
+    pub fn add_function(&mut self, proto: Rc<FnProto>) -> u16 {
+        self.constants.push(Constant::Function(proto));
         (self.constants.len() - 1) as u16
     }
 

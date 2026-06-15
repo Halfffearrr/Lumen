@@ -9,10 +9,11 @@
 //! assert_eq!(vm.output, "3\n");
 //! ```
 
+pub mod gc;
 mod value;
 mod vm;
 
-pub use value::{Native, RangeVal, Value};
+pub use value::{Closure, Native, RangeVal, Upvalue, Value};
 pub use vm::{RuntimeError, Vm};
 
 use lumen_compiler::{compile, CompileError};
@@ -58,7 +59,7 @@ pub fn interpret(source: &str) -> Result<Vm, LumenError> {
     resolve(&program).map_err(LumenError::Resolve)?;
     let chunk = compile(&program).map_err(LumenError::Compile)?;
     let mut vm = Vm::new();
-    vm.run(&chunk).map_err(LumenError::Runtime)?;
+    vm.run(chunk).map_err(LumenError::Runtime)?;
     Ok(vm)
 }
 
@@ -203,5 +204,61 @@ print(d["b"])"#),
     fn error_builtin_propagates() {
         let err = interpret(r#"error("boom")"#).unwrap_err();
         assert!(matches!(err, LumenError::Runtime(e) if e.message == "boom"));
+    }
+
+    // ---- stage 4: functions, recursion, closures ----
+
+    #[test]
+    fn functions_and_recursion() {
+        let src = "fn fib(n) {\n  if n < 2 { return n }\n  return fib(n - 1) + fib(n - 2)\n}\nprint(fib(10))";
+        assert_eq!(out(src), "55\n");
+    }
+
+    #[test]
+    fn function_value_is_expression_oriented() {
+        // No explicit `return`: the body's trailing expression is the result.
+        assert_eq!(out("fn square(x) { x * x }\nprint(square(9))"), "81\n");
+    }
+
+    #[test]
+    fn closures_capture_and_mutate_outer_variable() {
+        // The classic counter: each returned closure has its own captured `count`.
+        let src = "fn make_counter() {\n  let mut count = 0\n  return fn() { count = count + 1\n return count }\n}\nlet c = make_counter()\nprint(c())\nprint(c())\nprint(c())";
+        assert_eq!(out(src), "1\n2\n3\n");
+    }
+
+    #[test]
+    fn counters_are_independent() {
+        let src = "fn make_counter() {\n  let mut n = 0\n  return fn() { n = n + 1\n return n }\n}\nlet a = make_counter()\nlet b = make_counter()\nprint(a())\nprint(a())\nprint(b())";
+        assert_eq!(out(src), "1\n2\n1\n");
+    }
+
+    #[test]
+    fn higher_order_functions() {
+        let src =
+            "fn apply(f, x) { return f(x) }\nfn inc(n) { return n + 1 }\nprint(apply(inc, 41))";
+        assert_eq!(out(src), "42\n");
+    }
+
+    #[test]
+    fn lambda_passed_inline() {
+        let src = "fn apply(f, x) { return f(x) }\nprint(apply(fn(n) { n * 10 }, 5))";
+        assert_eq!(out(src), "50\n");
+    }
+
+    #[test]
+    fn closures_in_a_loop_capture_per_iteration() {
+        // Each iteration's closure must close over that iteration's `i`.
+        let src = "let mut fns = []\nfor i in 1..=3 {\n  push(fns, fn() { i })\n}\nprint(fns[0]())\nprint(fns[1]())\nprint(fns[2]())";
+        assert_eq!(out(src), "1\n2\n3\n");
+    }
+
+    #[test]
+    fn arity_mismatch_is_a_runtime_error() {
+        // The resolver checks arity for known functions; calling through a value
+        // is checked at run time.
+        let src = "fn apply(f) { return f(1) }\nfn two(a, b) { return a + b }\napply(two)";
+        let err = interpret(src).unwrap_err();
+        assert!(matches!(err, LumenError::Runtime(e) if e.message.contains("argument")));
     }
 }

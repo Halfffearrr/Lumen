@@ -17,11 +17,24 @@ use crate::chunk::{Chunk, Constant};
 use crate::opcode::Instr;
 
 /// Disassemble a whole chunk into a string, prefixed by a `== name ==` header.
+///
+/// Any function constants are disassembled too, after the current chunk, so a
+/// single call dumps the whole program including nested functions and closures.
 pub fn disassemble(chunk: &Chunk, name: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "== {name} ==");
     for i in 0..chunk.code.len() {
         let _ = writeln!(out, "{}", disassemble_instr(chunk, i));
+    }
+    for c in &chunk.constants {
+        if let Constant::Function(proto) = c {
+            let fname = if proto.name.is_empty() {
+                "<anonymous>"
+            } else {
+                &proto.name
+            };
+            let _ = write!(out, "\n{}", disassemble(&proto.chunk, fname));
+        }
     }
     out
 }
@@ -103,6 +116,14 @@ fn constant_repr(chunk: &Chunk, idx: u16) -> String {
         Some(Constant::Int(n)) => n.to_string(),
         Some(Constant::Float(f)) => format!("{f}"),
         Some(Constant::Str(s)) => format!("{s:?}"),
+        Some(Constant::Function(p)) => {
+            let name = if p.name.is_empty() {
+                "<anonymous>"
+            } else {
+                &p.name
+            };
+            format!("fn {name}/{}", p.arity)
+        }
         None => "<bad const>".into(),
     }
 }

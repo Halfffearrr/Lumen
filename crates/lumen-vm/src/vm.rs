@@ -10,13 +10,15 @@
 //! Runtime errors carry the source line of the instruction that raised them,
 //! reconstructed from the chunk's line table.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lumen_common::BUILTINS;
-use lumen_compiler::{Chunk, Constant, Instr};
+use lumen_compiler::{Chunk, Constant, FnProto, Instr};
 
-use crate::value::{values_equal, IterState, Native, Value};
+use crate::value::{values_equal, Closure, IterState, Native, Upvalue, Value};
 
 /// An error raised while executing bytecode.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,15 +48,44 @@ impl std::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-/// The virtual machine. Holds the value stack, the global environment (seeded
-/// with built-in functions), and a buffer that captures everything `print`s.
+/// One activation record. `base` is where this call's slots begin on the shared
+/// value stack: slot 0 (the closure being called) sits at `stack[base]`, so a
+/// local at compile-time slot `s` lives at `stack[base + s]`. `ip` is this
+/// frame's instruction pointer into its own chunk.
+struct CallFrame {
+    closure: Rc<Closure>,
+    ip: usize,
+    base: usize,
+}
+
+/// What [`Vm::exec`] tells the run loop to do next.
+enum Flow {
+    /// Keep fetching instructions from the (possibly newly pushed) top frame.
+    Continue,
+    /// The top-level script returned; this is the program's result.
+    Done(Value),
+}
+
+/// The virtual machine: the value stack, the call-frame stack, the list of
+/// open upvalues, the global environment (seeded with built-ins), and a buffer
+/// capturing everything `print`s.
 #[derive(Debug)]
 pub struct Vm {
     stack: Vec<Value>,
+    frames: Vec<CallFrame>,
+    /// Upvalues still pointing at live stack slots, so several closures capturing
+    /// the same variable share one cell and it can be closed when the slot dies.
+    open_upvalues: Vec<Rc<RefCell<Upvalue>>>,
     globals: HashMap<String, Value>,
     /// Everything written by `print`, newline-terminated. Buffering (rather than
     /// writing straight to stdout) keeps the VM testable; the CLI flushes this.
     pub output: String,
+}
+
+impl std::fmt::Debug for CallFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CallFrame{{ ip: {}, base: {} }}", self.ip, self.base)
+    }
 }
 
 impl Default for Vm {
@@ -79,6 +110,8 @@ impl Vm {
         }
         Vm {
             stack: Vec::new(),
+            frames: Vec::new(),
+            open_upvalues: Vec::new(),
             globals,
             output: String::new(),
         }
@@ -100,26 +133,59 @@ impl Vm {
         &self.stack[self.stack.len() - 1 - depth]
     }
 
-    /// Run a compiled chunk to completion, returning the value left on the stack
-    /// (or `nil`). Top-level statements net to an empty stack, so this is usually
-    /// `nil`; a bare trailing expression (handy in a REPL) leaves its value.
-    pub fn run(&mut self, chunk: &Chunk) -> Result<Value, RuntimeError> {
-        let mut ip = 0;
-        while ip < chunk.code.len() {
-            let instr = chunk.code[ip];
-            let line = chunk.lines[ip];
-            ip += 1;
-            if let Err(mut e) = self.exec(instr, chunk, &mut ip) {
-                e.line.get_or_insert(line);
-                return Err(e);
+    /// Run a compiled program to completion, returning the script's result value.
+    ///
+    /// The chunk is wrapped in a synthetic top-level closure (the "script") and
+    /// pushed as the first call frame. The loop then fetches and executes one
+    /// instruction at a time from whichever frame is on top, following calls and
+    /// returns by pushing and popping frames.
+    pub fn run(&mut self, chunk: Chunk) -> Result<Value, RuntimeError> {
+        let proto = Rc::new(FnProto {
+            name: "<script>".to_string(),
+            arity: 0,
+            chunk,
+            upvalues: Vec::new(),
+        });
+        let script = Rc::new(Closure {
+            proto,
+            upvalues: Vec::new(),
+        });
+        self.frames.push(CallFrame {
+            closure: script,
+            ip: 0,
+            base: 0,
+        });
+
+        loop {
+            let frame = self.frames.last().expect("a frame to execute");
+            let closure = frame.closure.clone();
+            let ip = frame.ip;
+            // Chunks always end with `Return`, so the ip never runs off the end.
+            let instr = closure.proto.chunk.code[ip];
+            let line = closure.proto.chunk.lines[ip];
+            self.frames.last_mut().unwrap().ip += 1;
+
+            match self.exec(instr, &closure) {
+                Ok(Flow::Continue) => {}
+                Ok(Flow::Done(value)) => return Ok(value),
+                Err(mut e) => {
+                    e.line.get_or_insert(line);
+                    return Err(e);
+                }
             }
         }
-        Ok(self.stack.pop().unwrap_or(Value::Nil))
     }
 
-    /// Execute one instruction. `ip` is already advanced past it; jumps overwrite
-    /// `ip` with an absolute target.
-    fn exec(&mut self, instr: Instr, chunk: &Chunk, ip: &mut usize) -> Result<(), RuntimeError> {
+    /// Set the current frame's instruction pointer (used by jumps).
+    fn set_ip(&mut self, target: usize) {
+        self.frames.last_mut().unwrap().ip = target;
+    }
+
+    /// Execute one instruction of the current frame (`closure`), whose ip is
+    /// already advanced past it. Returns whether to continue or finish.
+    fn exec(&mut self, instr: Instr, closure: &Rc<Closure>) -> Result<Flow, RuntimeError> {
+        let chunk = &closure.proto.chunk;
+        let base = self.frames.last().unwrap().base;
         match instr {
             Instr::Constant(i) => {
                 let v = constant_to_value(&chunk.constants[i as usize]);
@@ -129,10 +195,18 @@ impl Vm {
             Instr::True => self.push(Value::Bool(true)),
             Instr::False => self.push(Value::Bool(false)),
             Instr::Pop => {
+                // If the slot being discarded was captured, close its upvalue
+                // first so closures keep seeing the value.
+                if !self.open_upvalues.is_empty() {
+                    self.close_upvalues_from(self.stack.len() - 1);
+                }
                 self.pop();
             }
             Instr::PopKeepTop(n) => {
                 let top = self.pop();
+                if !self.open_upvalues.is_empty() {
+                    self.close_upvalues_from(self.stack.len() - n as usize);
+                }
                 for _ in 0..n {
                     self.pop();
                 }
@@ -170,12 +244,12 @@ impl Vm {
             Instr::Ge => self.binary(|a, b| compare(a, b, ">="))?,
 
             Instr::GetLocal(slot) => {
-                let v = self.stack[slot as usize].clone();
+                let v = self.stack[base + slot as usize].clone();
                 self.push(v);
             }
             Instr::SetLocal(slot) => {
                 // Assignment is an expression: leave the value on the stack.
-                self.stack[slot as usize] = self.peek(0).clone();
+                self.stack[base + slot as usize] = self.peek(0).clone();
             }
             Instr::GetGlobal(i) => {
                 let name = constant_str(chunk, i);
@@ -201,21 +275,21 @@ impl Vm {
                 self.globals.insert(name, v);
             }
 
-            Instr::Jump(target) => *ip = target,
+            Instr::Jump(target) => self.set_ip(target),
             Instr::JumpIfFalse(target) => {
                 let v = self.pop();
                 if !v.is_truthy() {
-                    *ip = target;
+                    self.set_ip(target);
                 }
             }
             Instr::JumpIfFalsePeek(target) => {
                 if !self.peek(0).is_truthy() {
-                    *ip = target;
+                    self.set_ip(target);
                 }
             }
             Instr::JumpIfTruePeek(target) => {
                 if self.peek(0).is_truthy() {
-                    *ip = target;
+                    self.set_ip(target);
                 }
             }
 
@@ -288,7 +362,7 @@ impl Vm {
             }
             Instr::ForIter { slot, exit } => {
                 // The iterator lives in a local slot; advance it in place.
-                let iter = match &self.stack[slot as usize] {
+                let iter = match &self.stack[base + slot as usize] {
                     Value::Iter(it) => it.clone(),
                     other => {
                         return Err(RuntimeError::new(format!(
@@ -300,7 +374,7 @@ impl Vm {
                 let next = iter.borrow_mut().next();
                 match next {
                     Some(elem) => self.push(elem),
-                    None => *ip = exit,
+                    None => self.set_ip(exit),
                 }
             }
             Instr::BuildStr(n) => {
@@ -313,20 +387,25 @@ impl Vm {
                 self.push(Value::str(s));
             }
 
-            Instr::Call(argc) => self.call(argc as usize)?,
-
-            // --- deferred to stage 4 (the compiler does not emit these yet) ---
-            Instr::Closure(_)
-            | Instr::Return
-            | Instr::GetUpvalue(_)
-            | Instr::SetUpvalue(_)
-            | Instr::CloseUpvalue => {
-                return Err(RuntimeError::new(
-                    "functions and closures are not supported until stage 4",
-                ))
+            Instr::Closure(idx) => self.op_closure(closure, base, idx)?,
+            Instr::GetUpvalue(i) => {
+                let v = read_upvalue(&closure.upvalues[i as usize], &self.stack);
+                self.push(v);
             }
+            Instr::SetUpvalue(i) => {
+                let v = self.peek(0).clone();
+                write_upvalue(&closure.upvalues[i as usize], &mut self.stack, v);
+            }
+            Instr::CloseUpvalue => {
+                // The compiler relies on implicit closing (see `Pop`/`Return`);
+                // this is a defensive no-op for an explicit close of the top.
+                self.close_upvalues_from(self.stack.len().saturating_sub(1));
+            }
+
+            Instr::Call(argc) => return self.op_call(argc as usize),
+            Instr::Return => return Ok(self.op_return(base)),
         }
-        Ok(())
+        Ok(Flow::Continue)
     }
 
     /// Pop two operands (in left/right order), apply `op`, push the result.
@@ -347,24 +426,98 @@ impl Vm {
         self.stack.split_off(at)
     }
 
+    /// Build a closure from the function constant `idx` of the enclosing closure,
+    /// capturing each upvalue either from a local of the current frame or from one
+    /// of the enclosing closure's own upvalues.
+    fn op_closure(
+        &mut self,
+        enclosing: &Rc<Closure>,
+        base: usize,
+        idx: u16,
+    ) -> Result<(), RuntimeError> {
+        let proto = match &enclosing.proto.chunk.constants[idx as usize] {
+            Constant::Function(p) => p.clone(),
+            other => unreachable!("Closure operand is not a function: {other:?}"),
+        };
+        let mut upvalues = Vec::with_capacity(proto.upvalues.len());
+        for desc in &proto.upvalues {
+            let cell = if desc.from_enclosing_local {
+                self.capture_upvalue(base + desc.index as usize)
+            } else {
+                enclosing.upvalues[desc.index as usize].clone()
+            };
+            upvalues.push(cell);
+        }
+        self.push(Value::Closure(Rc::new(Closure { proto, upvalues })));
+        Ok(())
+    }
+
+    /// Find the open upvalue for stack slot `idx`, or create and register one so
+    /// every closure capturing that slot shares the same cell.
+    fn capture_upvalue(&mut self, idx: usize) -> Rc<RefCell<Upvalue>> {
+        for cell in &self.open_upvalues {
+            if matches!(&*cell.borrow(), Upvalue::Open(i) if *i == idx) {
+                return cell.clone();
+            }
+        }
+        let cell = Rc::new(RefCell::new(Upvalue::Open(idx)));
+        self.open_upvalues.push(cell.clone());
+        cell
+    }
+
+    /// Close every open upvalue at or above stack index `threshold`, lifting its
+    /// value off the (about-to-be-popped) stack into the shared cell.
+    fn close_upvalues_from(&mut self, threshold: usize) {
+        let mut still_open = Vec::new();
+        for cell in std::mem::take(&mut self.open_upvalues) {
+            let idx = match &*cell.borrow() {
+                Upvalue::Open(i) => *i,
+                Upvalue::Closed(_) => continue,
+            };
+            if idx >= threshold {
+                let v = self.stack[idx].clone();
+                *cell.borrow_mut() = Upvalue::Closed(v);
+            } else {
+                still_open.push(cell);
+            }
+        }
+        self.open_upvalues = still_open;
+    }
+
     /// Invoke the callable sitting `argc` slots below the top of the stack with
-    /// the `argc` arguments above it. Stage 3 supports built-ins only.
-    fn call(&mut self, argc: usize) -> Result<(), RuntimeError> {
-        let args = self.pop_n(argc);
-        let callee = self.pop();
+    /// the `argc` arguments above it. Built-ins run immediately; a user closure
+    /// pushes a new frame whose slots reuse the callee and arguments in place.
+    fn op_call(&mut self, argc: usize) -> Result<Flow, RuntimeError> {
+        let callee_index = self.stack.len() - 1 - argc;
+        let callee = self.stack[callee_index].clone();
         match callee {
             Value::Native(native) => {
                 if let Some(arity) = native.arity {
                     if arity != argc {
-                        return Err(RuntimeError::new(format!(
-                            "{} expects {arity} argument(s), but got {argc}",
-                            native.name
-                        )));
+                        return Err(arity_error(native.name, arity, argc));
                     }
                 }
+                let args = self.pop_n(argc);
+                self.pop(); // the callee
                 let result = (native.func)(self, &args)?;
                 self.push(result);
-                Ok(())
+                Ok(Flow::Continue)
+            }
+            Value::Closure(closure) => {
+                if closure.proto.arity != argc {
+                    let name = if closure.proto.name.is_empty() {
+                        "<anonymous>"
+                    } else {
+                        &closure.proto.name
+                    };
+                    return Err(arity_error(name, closure.proto.arity, argc));
+                }
+                self.frames.push(CallFrame {
+                    closure,
+                    ip: 0,
+                    base: callee_index,
+                });
+                Ok(Flow::Continue)
             }
             other => Err(RuntimeError::new(format!(
                 "{} is not callable",
@@ -372,6 +525,46 @@ impl Vm {
             ))),
         }
     }
+
+    /// Return from the current frame: take the result, close this frame's
+    /// upvalues, discard its stack region, and either finish (the script) or hand
+    /// the result back to the caller.
+    fn op_return(&mut self, base: usize) -> Flow {
+        let result = self.pop();
+        self.close_upvalues_from(base);
+        self.stack.truncate(base);
+        self.frames.pop();
+        if self.frames.is_empty() {
+            Flow::Done(result)
+        } else {
+            self.push(result);
+            Flow::Continue
+        }
+    }
+}
+
+/// Read an upvalue cell: from the stack while open, from the cell once closed.
+fn read_upvalue(cell: &Rc<RefCell<Upvalue>>, stack: &[Value]) -> Value {
+    match &*cell.borrow() {
+        Upvalue::Open(idx) => stack[*idx].clone(),
+        Upvalue::Closed(v) => v.clone(),
+    }
+}
+
+/// Write through an upvalue cell to wherever the variable currently lives.
+fn write_upvalue(cell: &Rc<RefCell<Upvalue>>, stack: &mut [Value], value: Value) {
+    let mut slot = cell.borrow_mut();
+    match &mut *slot {
+        Upvalue::Open(idx) => stack[*idx] = value,
+        Upvalue::Closed(v) => *v = value,
+    }
+}
+
+/// A uniform arity-mismatch error for both native and user functions.
+fn arity_error(name: &str, expected: usize, got: usize) -> RuntimeError {
+    RuntimeError::new(format!(
+        "{name} expects {expected} argument(s), but got {got}"
+    ))
 }
 
 // --- constant / chunk decoding ----------------------------------------------
@@ -381,6 +574,10 @@ fn constant_to_value(c: &Constant) -> Value {
         Constant::Int(n) => Value::Int(*n),
         Constant::Float(x) => Value::Float(*x),
         Constant::Str(s) => Value::str(s),
+        // Functions become closures via the `Closure` instruction, never `Constant`.
+        Constant::Function(_) => {
+            unreachable!("function constants are instantiated by the Closure instruction")
+        }
     }
 }
 

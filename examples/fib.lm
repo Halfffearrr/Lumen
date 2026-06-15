@@ -1,0 +1,10 @@
+// Recursive Fibonacci — exercises function declarations, recursion, `if` as an
+// early-return guard, and integer arithmetic. Run with:  lumen examples/fib.lm
+fn fib(n) {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+for i in 0..=10 {
+    print("fib({i}) = {fib(i)}")
+}

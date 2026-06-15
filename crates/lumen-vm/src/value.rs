@@ -12,6 +12,8 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
+use lumen_compiler::FnProto;
+
 use crate::vm::{RuntimeError, Vm};
 
 /// The signature of a built-in (native) function: it receives the VM (so e.g.
@@ -91,6 +93,31 @@ impl IterState {
     }
 }
 
+/// One captured variable shared between a closure and its defining frame.
+///
+/// While the captured local is still live on the stack the upvalue is **open**
+/// and holds that slot's index, so reads and writes go straight to the stack and
+/// the closure and the enclosing code see the same variable. When the slot is
+/// about to disappear (its scope exits or the function returns) the VM **closes**
+/// the upvalue, copying the value into the cell so the closure keeps working
+/// after the frame is gone. This is the heart of how closures outlive their
+/// defining call.
+#[derive(Debug)]
+pub enum Upvalue {
+    /// Still on the stack, at this absolute index.
+    Open(usize),
+    /// Lifted off the stack into the cell.
+    Closed(Value),
+}
+
+/// A runtime closure: a function prototype plus the cells it captured. Calling a
+/// `fn`/lambda value means calling one of these.
+#[derive(Debug)]
+pub struct Closure {
+    pub proto: Rc<FnProto>,
+    pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
+}
+
 /// A Lumen runtime value.
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -105,6 +132,8 @@ pub enum Value {
     Dict(Rc<RefCell<Vec<(Value, Value)>>>),
     Range(RangeVal),
     Iter(Rc<RefCell<IterState>>),
+    /// A user-defined function value (closure over captured upvalues).
+    Closure(Rc<Closure>),
     Native(Native),
 }
 
@@ -137,7 +166,7 @@ impl Value {
             Value::Dict(_) => "dict",
             Value::Range(_) => "range",
             Value::Iter(_) => "iterator",
-            Value::Native(_) => "function",
+            Value::Closure(_) | Value::Native(_) => "function",
         }
     }
 }
@@ -155,6 +184,8 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Nil, Value::Nil) => true,
         (Value::Str(x), Value::Str(y)) => x == y,
         (Value::Range(x), Value::Range(y)) => x == y,
+        // Functions have identity, not structure: equal iff the same object.
+        (Value::Closure(x), Value::Closure(y)) => Rc::ptr_eq(x, y),
         (Value::List(x), Value::List(y)) => {
             let (x, y) = (x.borrow(), y.borrow());
             x.len() == y.len() && x.iter().zip(y.iter()).all(|(a, b)| values_equal(a, b))
@@ -215,6 +246,14 @@ impl fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Iter(_) => write!(f, "<iterator>"),
+            Value::Closure(c) => {
+                let name = if c.proto.name.is_empty() {
+                    "<anonymous>"
+                } else {
+                    &c.proto.name
+                };
+                write!(f, "<fn {name}>")
+            }
             Value::Native(n) => write!(f, "<fn {}>", n.name),
         }
     }
