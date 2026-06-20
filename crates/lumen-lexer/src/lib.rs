@@ -140,6 +140,18 @@ mod tests {
     }
 
     #[test]
+    fn interpolation_ignores_braces_inside_nested_strings() {
+        let tokens = tokenize(r#""expr brace: {"{"}""#).unwrap();
+        match &tokens[0].kind {
+            Template(parts) => match parts.iter().find(|p| matches!(p, StrPart::Expr { .. })) {
+                Some(StrPart::Expr { source, .. }) => assert_eq!(source, r#""{""#),
+                _ => panic!("expected an expr part containing a string literal"),
+            },
+            other => panic!("expected a template, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn spans_track_line_and_column() {
         // `let` on line 1, `x` on line 2 after two spaces of indentation.
         let tokens = tokenize("let\n  x").unwrap();

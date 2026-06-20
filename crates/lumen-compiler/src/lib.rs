@@ -226,6 +226,32 @@ mod tests {
     }
 
     #[test]
+    fn too_many_parameters_is_an_error() {
+        let params = (0..=255)
+            .map(|i| format!("p{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let src = format!("fn f({params}) {{ return nil }}");
+        let program = parse(tokenize(&src).unwrap()).unwrap();
+        resolve(&program).unwrap();
+        let err = compile(&program).unwrap_err();
+        assert!(matches!(err, CompileError::TooManyParameters { .. }));
+    }
+
+    #[test]
+    fn too_many_call_arguments_is_an_error() {
+        let args = (0..=255)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let src = format!("print({args})");
+        let program = parse(tokenize(&src).unwrap()).unwrap();
+        resolve(&program).unwrap();
+        let err = compile(&program).unwrap_err();
+        assert!(matches!(err, CompileError::TooManyArguments { .. }));
+    }
+
+    #[test]
     fn disassembly_is_readable() {
         let chunk = chunk_of("1 + 2");
         let text = disassemble(&chunk, "test");

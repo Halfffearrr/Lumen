@@ -404,6 +404,10 @@ impl<'src> Scanner<'src> {
                 });
             };
             match c {
+                '"' => {
+                    self.advance();
+                    self.interpolation_string(str_start, str_pos)?;
+                }
                 '{' => {
                     depth += 1;
                     self.advance();
@@ -421,6 +425,29 @@ impl<'src> Scanner<'src> {
                 _ => {
                     self.advance();
                 }
+            }
+        }
+    }
+
+    /// Skip a string literal that appears inside an interpolation expression.
+    /// Braces inside that nested string are data, not interpolation delimiters.
+    fn interpolation_string(&mut self, str_start: usize, str_pos: Pos) -> Result<(), LexError> {
+        loop {
+            let Some(c) = self.advance() else {
+                return Err(LexError::UnterminatedInterpolation {
+                    span: self.span_from(str_start, str_pos),
+                });
+            };
+            match c {
+                '"' => return Ok(()),
+                '\\' => {
+                    if self.advance().is_none() {
+                        return Err(LexError::UnterminatedInterpolation {
+                            span: self.span_from(str_start, str_pos),
+                        });
+                    }
+                }
+                _ => {}
             }
         }
     }

@@ -250,4 +250,28 @@ mod tests {
         let errs = resolve(&prog("break")).unwrap_err();
         assert!(matches!(errs[0], ResolveError::BreakOutsideLoop { .. }));
     }
+
+    #[test]
+    fn resolver_flags_return_outside_function() {
+        let errs = resolve(&prog("return 1")).unwrap_err();
+        assert!(matches!(
+            errs[0],
+            ResolveError::ReturnOutsideFunction { .. }
+        ));
+    }
+
+    #[test]
+    fn resolver_flags_duplicate_bindings_in_same_scope() {
+        let errs = resolve(&prog("let x = 1\nlet x = 2")).unwrap_err();
+        assert!(matches!(errs[0], ResolveError::DuplicateBinding { .. }));
+
+        let errs = resolve(&prog("fn f() { 1 }\nfn f() { 2 }")).unwrap_err();
+        assert!(matches!(errs[0], ResolveError::DuplicateBinding { .. }));
+    }
+
+    #[test]
+    fn resolver_flags_duplicate_parameters() {
+        let errs = resolve(&prog("fn f(a, a) { return a }")).unwrap_err();
+        assert!(matches!(errs[0], ResolveError::DuplicateBinding { .. }));
+    }
 }

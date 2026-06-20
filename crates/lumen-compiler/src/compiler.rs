@@ -45,6 +45,10 @@ pub enum CompileError {
     TooManyConstants { span: Span, limit: usize },
     #[error("too many local variables in scope (limit {limit})")]
     TooManyLocals { span: Span, limit: usize },
+    #[error("too many function parameters (limit {limit})")]
+    TooManyParameters { span: Span, limit: usize },
+    #[error("too many call arguments (limit {limit})")]
+    TooManyArguments { span: Span, limit: usize },
 }
 
 impl Diagnostic for CompileError {
@@ -53,7 +57,9 @@ impl Diagnostic for CompileError {
             CompileError::ReturnOutsideFunction { span }
             | CompileError::BreakOutsideLoop { span }
             | CompileError::TooManyConstants { span, .. }
-            | CompileError::TooManyLocals { span, .. } => *span,
+            | CompileError::TooManyLocals { span, .. }
+            | CompileError::TooManyParameters { span, .. }
+            | CompileError::TooManyArguments { span, .. } => *span,
         }
     }
 
@@ -230,6 +236,12 @@ impl Compiler {
 
     /// Compile a function (named or lambda) into a [`FnProto`].
     fn compile_proto(&mut self, f: &Function) -> Result<Rc<FnProto>, CompileError> {
+        if f.params.len() > u8::MAX as usize {
+            return Err(CompileError::TooManyParameters {
+                span: f.span,
+                limit: u8::MAX as usize,
+            });
+        }
         self.begin_function(&f.params);
         // The body is a block; its trailing value is the function's result.
         self.begin_scope();
@@ -683,6 +695,12 @@ impl Compiler {
                 self.emit(Instr::MakeRange(*inclusive), span.line);
             }
             ExprKind::Call { callee, args } => {
+                if args.len() > u8::MAX as usize {
+                    return Err(CompileError::TooManyArguments {
+                        span,
+                        limit: u8::MAX as usize,
+                    });
+                }
                 self.expr(callee)?;
                 for arg in args {
                     self.expr(arg)?;

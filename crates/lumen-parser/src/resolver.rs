@@ -26,6 +26,10 @@ pub enum ResolveError {
     Immutable { name: String, span: Span },
     #[error("'break' outside of a loop")]
     BreakOutsideLoop { span: Span },
+    #[error("'return' outside of a function")]
+    ReturnOutsideFunction { span: Span },
+    #[error("duplicate binding '{name}' in the same scope")]
+    DuplicateBinding { name: String, span: Span },
     #[error("function '{name}' expects {expected} argument(s), but got {got}")]
     ArityMismatch {
         name: String,
@@ -41,6 +45,8 @@ impl Diagnostic for ResolveError {
             ResolveError::Undefined { span, .. }
             | ResolveError::Immutable { span, .. }
             | ResolveError::BreakOutsideLoop { span }
+            | ResolveError::ReturnOutsideFunction { span }
+            | ResolveError::DuplicateBinding { span, .. }
             | ResolveError::ArityMismatch { span, .. } => *span,
         }
     }
@@ -56,6 +62,7 @@ struct Binding {
     is_mutable: bool,
     /// Fixed call arity when the name denotes a function, else `None`.
     arity: Option<usize>,
+    span: Span,
 }
 
 /// Resolve a whole program, returning all errors found (empty `Ok` on success).
@@ -81,6 +88,7 @@ pub fn resolve_with_globals(
             Binding {
                 is_mutable: true,
                 arity: None,
+                span: Span::new(0, 0, 1, 1),
             },
         );
     }
@@ -98,6 +106,7 @@ struct Resolver {
     scopes: Vec<HashMap<String, Binding>>,
     errors: Vec<ResolveError>,
     loop_depth: usize,
+    function_depth: usize,
 }
 
 impl Resolver {
@@ -109,6 +118,7 @@ impl Resolver {
                 Binding {
                     is_mutable: false,
                     arity: b.arity,
+                    span: Span::new(0, 0, 1, 1),
                 },
             );
         }
@@ -116,6 +126,7 @@ impl Resolver {
             scopes: vec![builtins],
             errors: Vec::new(),
             loop_depth: 0,
+            function_depth: 0,
         }
     }
 
@@ -128,6 +139,18 @@ impl Resolver {
     }
 
     fn define(&mut self, name: &str, binding: Binding) {
+        let duplicate = self
+            .scopes
+            .last()
+            .expect("at least one scope")
+            .contains_key(name);
+        if duplicate {
+            self.error(ResolveError::DuplicateBinding {
+                name: name.to_string(),
+                span: binding.span,
+            });
+            return;
+        }
         self.scopes
             .last_mut()
             .expect("at least one scope")
@@ -157,6 +180,7 @@ impl Resolver {
                         Binding {
                             is_mutable: false,
                             arity: Some(func.params.len()),
+                            span: func.span,
                         },
                     );
                 }
@@ -173,7 +197,7 @@ impl Resolver {
                 name,
                 is_mutable,
                 value,
-                ..
+                span,
             } => {
                 // The initializer is resolved before the name is bound, so
                 // `let x = x` refers to an outer `x` (or errors), never itself.
@@ -183,20 +207,11 @@ impl Resolver {
                     Binding {
                         is_mutable: *is_mutable,
                         arity: None,
+                        span: *span,
                     },
                 );
             }
             Stmt::Function(func) => {
-                // Bind the name first so the body can call itself (recursion).
-                if let Some(name) = &func.name {
-                    self.define(
-                        name,
-                        Binding {
-                            is_mutable: false,
-                            arity: Some(func.params.len()),
-                        },
-                    );
-                }
                 self.resolve_function(func);
             }
             Stmt::While { cond, body, .. } => {
@@ -206,7 +221,10 @@ impl Resolver {
                 self.loop_depth -= 1;
             }
             Stmt::For {
-                var, iter, body, ..
+                var,
+                iter,
+                body,
+                span,
             } => {
                 self.resolve_expr(iter);
                 self.loop_depth += 1;
@@ -217,6 +235,7 @@ impl Resolver {
                     Binding {
                         is_mutable: false,
                         arity: None,
+                        span: *span,
                     },
                 );
                 self.resolve_block_inner(body);
@@ -234,6 +253,9 @@ impl Resolver {
                 }
             }
             Stmt::Return { value, .. } => {
+                if self.function_depth == 0 {
+                    self.error(ResolveError::ReturnOutsideFunction { span: stmt.span() });
+                }
                 if let Some(value) = value {
                     self.resolve_expr(value);
                 }
@@ -244,6 +266,7 @@ impl Resolver {
 
     /// Resolve a function's parameters and body in a fresh scope.
     fn resolve_function(&mut self, func: &Function) {
+        self.function_depth += 1;
         self.begin_scope();
         for param in &func.params {
             // Parameters are immutable by default (Lumen's Rust-like theme).
@@ -252,11 +275,13 @@ impl Resolver {
                 Binding {
                     is_mutable: false,
                     arity: None,
+                    span: param.span,
                 },
             );
         }
         self.resolve_block_inner(&func.body);
         self.end_scope();
+        self.function_depth -= 1;
     }
 
     /// Resolve a block in its own new scope.
@@ -366,6 +391,7 @@ impl Resolver {
                         Binding {
                             is_mutable: false,
                             arity: Some(func.params.len()),
+                            span: func.span,
                         },
                     );
                 }
