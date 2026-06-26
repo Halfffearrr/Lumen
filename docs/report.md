@@ -30,7 +30,9 @@ Hand-written scanner: source string → `Vec<Token>`. Every token carries a `Spa
 the source-caret error messages. It handles numbers (distinguishing `1.5` from
 the `..` range operator), keywords vs identifiers, string escapes, and string
 **interpolation**, where `"a {b} c"` is scanned into literal and expression
-parts.
+parts. A small but important edge case is that an interpolation expression may
+itself contain a string literal; braces inside that nested string are ignored by
+the interpolation scanner, so `"{"` inside `{ ... }` is data, not a delimiter.
 
 ### Parser + Resolver (`lumen-parser`)
 The parser is **recursive descent** for statements and **Pratt parsing**
@@ -43,10 +45,17 @@ multiplication. Two design choices are visible in the AST:
 
 The **resolver** is a separate static-analysis pass (buff6) embodying Rust's
 "catch errors at compile time" spirit. It reports undefined variables,
-assignment to immutable bindings, `break` outside a loop, and call-arity
+assignment to immutable bindings, duplicate names in one scope, duplicate
+parameters, `break` outside a loop, `return` outside a function, and call-arity
 mismatches — all *before* anything runs. It also hoists function declarations so
 mutually-recursive functions (like the calculator's `expr`/`term`/`factor`)
 resolve regardless of order.
+
+For command-line use, the parser has a conservative recovery mode: after a
+statement-level syntax error it skips to a semicolon or the next likely statement
+start and continues. This keeps the core recursive-descent parser simple, but it
+lets the CLI show several parse errors from one file instead of stopping at the
+first typo.
 
 ### Compiler (`lumen-compiler`)
 A single walk of the AST emitting stack-machine instructions, on two invariants:
@@ -65,6 +74,10 @@ once the destination is known, and backward jumps whose target is already known.
 Functions compile to their own `Chunk` stored as a constant; capturing an
 enclosing variable threads an **upvalue** descriptor down through each
 intervening function (`resolve_upvalue`).
+
+The bytecode stores function-call arity in a `u8`, so the compiler explicitly
+rejects functions and calls with more than 255 parameters/arguments instead of
+letting the count wrap silently.
 
 ### VM (`lumen-vm`)
 A fetch-decode-execute loop over the current call frame's chunk. Each `CallFrame`
@@ -104,7 +117,11 @@ requirement — runs its collection on a **background thread**:
 `lumen --gc-demo` builds a rooted chain plus an unrooted cycle and shows the
 background collector reclaiming exactly the cycle. This separation — `Rc` on the
 hot path, a concurrent tracing collector for the cycle case — is an honest,
-testable demonstration of both the algorithm and thread-based concurrency.
+testable demonstration of both the algorithm and thread-based concurrency. I
+kept the tracing heap separate from the live `Value` representation because
+fully replacing the `Rc<RefCell<...>>` runtime heap would require a larger
+ownership and rooting redesign; the demo isolates the GC idea without
+destabilizing the interpreter.
 
 ## 5. How Rust's ideas show up
 
@@ -134,11 +151,13 @@ re-run `cargo run --release -p lumen-cli -- examples/bench.lm`.)
 
 ## 7. Testing
 
-Around 70 tests across the crates: unit tests per stage (lexer token kinds,
+Around 80 tests across the crates: unit tests per stage (lexer token kinds,
 parser precedence/AST shape, compiler bytecode shape, GC mark/sweep/cycles), VM
 end-to-end behaviour, and `lumen-vm/tests/integration.rs`, which runs every
-bundled example through the whole pipeline and checks its output. `cargo fmt
---check` and `cargo clippy --all-targets` are clean.
+bundled example through the whole pipeline and checks its output. The tests also
+cover parse recovery, duplicate-name diagnostics, interpolation braces inside
+nested strings, and bytecode arity limits. `cargo fmt --check` and `cargo clippy
+--all-targets` are clean.
 
 ## 8. If I had another week
 

@@ -95,3 +95,8 @@ lambda  = "fn" "(" [ params ] ")" block ;
   expression on the left.
 - **Immutability.** `let` is immutable, `let mut` is mutable; the resolver rejects
   assignment to an immutable binding at compile time.
+- **Static checks.** The resolver also reports undefined variables, duplicate
+  names in one scope, duplicate function parameters, `break` outside loops,
+  `return` outside functions, and wrong argument counts for known functions.
+- **Limits.** Function declarations and calls are limited to 255 parameters or
+  arguments because the bytecode stores call arity in one byte.

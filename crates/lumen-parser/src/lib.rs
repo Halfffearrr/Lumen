@@ -19,7 +19,7 @@ pub mod ast;
 mod parser;
 mod resolver;
 
-pub use parser::{parse, ParseError, Parser};
+pub use parser::{parse, parse_recovering, ParseError, Parser};
 pub use resolver::{resolve, resolve_with_globals, ResolveError};
 
 #[cfg(test)]
@@ -106,6 +106,15 @@ mod tests {
         // `1 = 2` is not a valid assignment target.
         let err = parse(tokenize("1 = 2").unwrap()).unwrap_err();
         assert!(matches!(err, ParseError::InvalidAssignTarget { .. }));
+    }
+
+    #[test]
+    fn recovering_parse_reports_multiple_statement_errors() {
+        let errs = parse_recovering(tokenize("let = 1\nlet = 2").unwrap()).unwrap_err();
+        assert_eq!(errs.len(), 2);
+        assert!(errs
+            .iter()
+            .all(|err| matches!(err, ParseError::Expected { .. })));
     }
 
     #[test]

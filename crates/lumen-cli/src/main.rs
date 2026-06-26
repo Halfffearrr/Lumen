@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use lumen_common::{Diagnostic, Span};
 use lumen_compiler::{compile, compile_repl, disassemble};
 use lumen_lexer::tokenize;
-use lumen_parser::{parse, resolve, resolve_with_globals};
+use lumen_parser::{parse_recovering, resolve, resolve_with_globals};
 use lumen_vm::gc::Collector;
 use lumen_vm::{LumenError, Value, Vm};
 
@@ -60,7 +60,7 @@ fn run_file(path: &str) -> Result<(), String> {
 fn disassemble_file(path: &str) -> Result<(), String> {
     let source = read(path)?;
     let tokens = tokenize(&source).map_err(|e| render(&source, e.span(), &e.message()))?;
-    let program = parse(tokens).map_err(|e| render(&source, e.span(), &e.message()))?;
+    let program = parse_recovering(tokens).map_err(|errs| render_all(&source, &errs))?;
     resolve(&program).map_err(|errs| render_all(&source, &errs))?;
     let chunk = compile(&program).map_err(|e| render(&source, e.span(), &e.message()))?;
     print!("{}", disassemble(&chunk, path));
@@ -100,9 +100,9 @@ fn eval_repl_line(vm: &mut Vm, line: &str) {
         Ok(t) => t,
         Err(e) => return eprint!("{}", render(line, e.span(), &e.message())),
     };
-    let program = match parse(tokens) {
+    let program = match parse_recovering(tokens) {
         Ok(p) => p,
-        Err(e) => return eprint!("{}", render(line, e.span(), &e.message())),
+        Err(errs) => return eprint!("{}", render_all(line, &errs)),
     };
     if let Err(errs) = resolve_with_globals(&program, &vm.global_names()) {
         return eprint!("{}", render_all(line, &errs));
@@ -133,7 +133,7 @@ fn eval_repl_line(vm: &mut Vm, line: &str) {
 fn report(source: &str, err: &LumenError) -> String {
     match err {
         LumenError::Lex(e) => render(source, e.span(), &e.message()),
-        LumenError::Parse(e) => render(source, e.span(), &e.message()),
+        LumenError::Parse(errs) => render_all(source, errs),
         LumenError::Compile(e) => render(source, e.span(), &e.message()),
         LumenError::Resolve(errs) => render_all(source, errs),
         LumenError::Runtime(e) => render_runtime(source, e),

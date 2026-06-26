@@ -52,6 +52,12 @@ pub fn parse(tokens: Vec<Token>) -> Result<Program, ParseError> {
     Parser::new(tokens).parse_program()
 }
 
+/// Parse a full token stream, recovering after statement-level errors so the
+/// caller can report several syntax problems at once.
+pub fn parse_recovering(tokens: Vec<Token>) -> Result<Program, Vec<ParseError>> {
+    Parser::new(tokens).parse_program_recovering()
+}
+
 /// A cursor over a token stream that builds AST nodes.
 pub struct Parser {
     tokens: Vec<Token>,
@@ -70,6 +76,30 @@ impl Parser {
             stmts.push(self.parse_item()?);
         }
         Ok(stmts)
+    }
+
+    /// Parse the whole program, keeping valid statements after a syntax error.
+    ///
+    /// This is intentionally conservative: it synchronizes at semicolons and
+    /// obvious statement starts, which is enough for command-line diagnostics
+    /// without making the core parser harder to reason about.
+    pub fn parse_program_recovering(&mut self) -> Result<Program, Vec<ParseError>> {
+        let mut stmts = Vec::new();
+        let mut errors = Vec::new();
+        while !self.is_at_end() {
+            match self.parse_item() {
+                Ok(stmt) => stmts.push(stmt),
+                Err(err) => {
+                    errors.push(err);
+                    self.synchronize();
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(stmts)
+        } else {
+            Err(errors)
+        }
     }
 
     // ------------------------------------------------------------- token cursor
@@ -131,6 +161,29 @@ impl Parser {
             expected: expected.to_string(),
             found: describe(&self.peek().kind),
             span: self.peek().span,
+        }
+    }
+
+    /// Skip tokens after a parse error until the next likely statement boundary.
+    fn synchronize(&mut self) {
+        if self.is_at_end() {
+            return;
+        }
+        self.advance();
+        while !self.is_at_end() {
+            if matches!(
+                self.tokens.get(self.pos.wrapping_sub(1)).map(|t| &t.kind),
+                Some(TokenKind::Semicolon)
+            ) {
+                return;
+            }
+            if self.is_stmt_start() || self.can_start_expr() {
+                return;
+            }
+            if self.check(&TokenKind::RBrace) {
+                return;
+            }
+            self.advance();
         }
     }
 

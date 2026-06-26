@@ -63,10 +63,12 @@ See [`examples/`](examples/): `fizzbuzz.lm`, `tour.lm`, `fib.lm`, `closures.lm`,
 
 - Values: `int` (i64), `float` (f64), `bool`, `nil`, `str`, `list`, `dict`, `range`, functions.
 - Immutable-by-default bindings (`let` / `let mut`), checked statically by the resolver.
+- Static diagnostics for undefined variables, duplicate bindings/parameters,
+  invalid `return`/`break`, immutable assignment, and known call arity.
 - Expression-oriented: `if`/`else` and blocks produce values.
 - Control flow: `if`, `while`, `for … in range/list`, `loop` + `break`.
 - First-class functions: recursion, anonymous `fn(x){…}`, and closures with upvalue capture.
-- String interpolation: `"hi {name}, {1 + 1}"`.
+- String interpolation: `"hi {name}, {1 + 1}"`, including nested expressions.
 - Standard library: `print len type str int float sqrt abs floor min max push pop keys values error clock`.
 
 ## Crates
@@ -88,7 +90,7 @@ See [`examples/`](examples/): `fizzbuzz.lm`, `tour.lm`, `fib.lm`, `closures.lm`,
 | 2 | REPL                       | `lumen` with no arguments                     |
 | 4 | Concurrent mark-sweep GC   | `lumen-vm/src/gc.rs`, `lumen --gc-demo`       |
 | 5 | Standard library           | `lumen-vm/src/vm.rs` builtins                 |
-| 6 | Static checks (resolver)   | `lumen-parser/src/resolver.rs`                |
+| 6 | Static checks + parse recovery | `lumen-parser/src/resolver.rs`, `parser.rs` |
 | 7 | Self-hosting step          | `examples/calc.lm` (a calculator in Lumen)    |
 | 8 | Disassembler               | `lumen --disassemble`                         |
 

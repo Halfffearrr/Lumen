@@ -18,14 +18,14 @@ pub use vm::{RuntimeError, Vm};
 
 use lumen_compiler::{compile, CompileError};
 use lumen_lexer::{tokenize, LexError};
-use lumen_parser::{parse, resolve, ParseError, ResolveError};
+use lumen_parser::{parse_recovering, resolve, ParseError, ResolveError};
 
 /// Any error that can stop a Lumen program before it produces output, tagged by
 /// the pipeline stage that raised it.
 #[derive(Debug)]
 pub enum LumenError {
     Lex(LexError),
-    Parse(ParseError),
+    Parse(Vec<ParseError>),
     Resolve(Vec<ResolveError>),
     Compile(CompileError),
     Runtime(RuntimeError),
@@ -35,7 +35,13 @@ impl std::fmt::Display for LumenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LumenError::Lex(e) => write!(f, "lex error: {e}"),
-            LumenError::Parse(e) => write!(f, "parse error: {e}"),
+            LumenError::Parse(errs) => {
+                writeln!(f, "{} parse error(s):", errs.len())?;
+                for e in errs {
+                    writeln!(f, "  {e}")?;
+                }
+                Ok(())
+            }
             LumenError::Resolve(errs) => {
                 writeln!(f, "{} resolve error(s):", errs.len())?;
                 for e in errs {
@@ -55,7 +61,7 @@ impl std::error::Error for LumenError {}
 /// its captured [`Vm::output`].
 pub fn interpret(source: &str) -> Result<Vm, LumenError> {
     let tokens = tokenize(source).map_err(LumenError::Lex)?;
-    let program = parse(tokens).map_err(LumenError::Parse)?;
+    let program = parse_recovering(tokens).map_err(LumenError::Parse)?;
     resolve(&program).map_err(LumenError::Resolve)?;
     let chunk = compile(&program).map_err(LumenError::Compile)?;
     let mut vm = Vm::new();
@@ -197,6 +203,15 @@ print(d["b"])"#),
                 assert_eq!(e.line, Some(2));
             }
             other => panic!("expected a runtime error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_errors_are_collected() {
+        let err = interpret("let = 1\nlet = 2").unwrap_err();
+        match err {
+            LumenError::Parse(errs) => assert_eq!(errs.len(), 2),
+            other => panic!("expected parse errors, got {other:?}"),
         }
     }
 
