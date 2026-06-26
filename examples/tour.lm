@@ -1,15 +1,16 @@
-// A short tour of everything stage 3 supports (no functions yet — those arrive
-// in stage 4). Run with:  lumen examples/tour.lm
+// Lumen 语言特性的快速总览。
+// 这个示例集中展示变量、表达式、循环、列表、字典和逻辑运算。
+// 运行方式：lumen examples/tour.lm
 
-// Immutable by default; `let mut` to opt in to mutation.
+// 变量默认不可变；需要修改时使用 let mut。
 let pi = 3.14
 let mut total = 0
 
-// `if` is an expression: it produces the value of the taken branch.
+// if 是表达式：它会产生被执行分支的值。
 let mood = if total == 0 { "fresh" } else { "busy" }
 print("starting {mood}, pi = {pi}")
 
-// while + ranges + for, accumulating into a mutable binding.
+// while、范围和 for 循环：把结果累加到可变变量中。
 let mut i = 1
 while i <= 3 {
     total = total + i
@@ -20,7 +21,7 @@ for n in 1..=3 {
 }
 print("total = {total}")          // 6 + 60 = 66
 
-// Lists and dicts with indexing and the small standard library.
+// 列表和字典：支持索引访问，并可以配合小型标准库函数使用。
 let xs = [1, 2, 3]
 push(xs, 4)
 print("xs = {xs}, len = {len(xs)}, first = {xs[0]}")
@@ -30,7 +31,7 @@ scores["carol"] = 85
 let bob = scores["bob"]
 print("bob = {bob}, keys = {keys(scores)}")
 
-// loop + break, and short-circuiting logical operators.
+// loop + break，以及支持短路求值的逻辑运算符。
 let mut count = 0
 loop {
     count = count + 1

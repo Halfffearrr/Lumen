@@ -1,5 +1,6 @@
-// Recursive Fibonacci — exercises function declarations, recursion, `if` as an
-// early-return guard, and integer arithmetic. Run with:  lumen examples/fib.lm
+// 递归 Fibonacci：用于展示函数声明、递归调用、
+// 使用 if 做提前返回判断，以及整数运算。
+// 运行方式：lumen examples/fib.lm
 fn fib(n) {
     if n < 2 { return n }
     return fib(n - 1) + fib(n - 2)

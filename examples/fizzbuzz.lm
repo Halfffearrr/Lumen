@@ -1,5 +1,6 @@
-// FizzBuzz — the canonical stage-3 demo: ranges, for-loops, if/else-if chains,
-// the `%` operator and `print`. Run it with:  lumen examples/fizzbuzz.lm
+// FizzBuzz：一个经典的基础演示，用来展示范围、for 循环、
+// if/else-if 分支、取模运算符 `%` 和 print 输出。
+// 运行方式：lumen examples/fizzbuzz.lm
 for i in 1..=15 {
     if i % 15 == 0 {
         print("FizzBuzz")

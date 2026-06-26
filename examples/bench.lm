@@ -1,7 +1,7 @@
-// A self-timed micro-benchmark (buff3) using the `clock()` built-in, which
-// returns wall-clock seconds. It times naive recursive fib(30) — heavy on
-// function calls and integer arithmetic — so the bytecode VM's call path is
-// what's being measured. Run with:  lumen examples/bench.lm
+// 一个自计时的微型 benchmark，使用内置函数 clock() 获取当前时间。
+// 这里计算朴素递归 fib(30)，它会产生大量函数调用和整数运算，
+// 因此可以用来观察字节码虚拟机的函数调用路径表现。
+// 运行方式：lumen examples/bench.lm
 
 fn fib(n) {
     if n < 2 { return n }

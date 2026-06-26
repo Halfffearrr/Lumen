@@ -1,11 +1,12 @@
-// A tiny arithmetic calculator written in Lumen itself (buff7: a step toward
-// self-hosting). It is a recursive-descent parser/evaluator for `+ - * /` and
-// parentheses with the usual precedence, working directly on the source string.
+// 一个用 Lumen 自己写出来的小型四则运算计算器。
+// 这可以看作向“自举”方向迈出的一小步：用语言本身实现一个解析器/求值器。
+// 它直接处理源码字符串，使用递归下降方法解析 + - * / 和括号，
+// 并按照常见优先级计算表达式。
 //
-// It exercises a lot of the language at once: mutually-recursive functions
-// (expr -> term -> factor -> expr), string indexing and comparison, the
-// int()/float() built-ins, and mutable global state for the cursor.
-// Run with:  lumen examples/calc.lm
+// 这个示例同时覆盖了不少语言能力：互相调用的解析函数
+// （expr -> term -> factor -> expr）、字符串索引和比较、
+// int()/float() 内置函数，以及用于记录当前位置的可变全局状态。
+// 运行方式：lumen examples/calc.lm
 
 let mut src = ""
 let mut pos = 0
@@ -29,7 +30,7 @@ fn is_digit(c) {
     return c >= "0" && c <= "9"
 }
 
-// number := digit+ ( '.' digit+ )?
+// 数字规则：number := digit+ ( '.' digit+ )?
 fn number() {
     let mut s = ""
     while is_digit(peek()) { s = s + advance() }
@@ -41,20 +42,20 @@ fn number() {
     return int(s)
 }
 
-// factor := number | '(' expr ')'
+// 因子规则：factor := number | '(' expr ')'
 fn factor() {
     skip_spaces()
     if peek() == "(" {
-        advance()              // consume '('
+        advance()              // 消耗左括号 '('
         let v = expr()
         skip_spaces()
-        advance()              // consume ')'
+        advance()              // 消耗右括号 ')'
         return v
     }
     return number()
 }
 
-// term := factor ( ('*' | '/') factor )*
+// 项规则：term := factor ( ('*' | '/') factor )*
 fn term() {
     let mut v = factor()
     skip_spaces()
@@ -67,7 +68,7 @@ fn term() {
     return v
 }
 
-// expr := term ( ('+' | '-') term )*
+// 表达式规则：expr := term ( ('+' | '-') term )*
 fn expr() {
     let mut v = term()
     skip_spaces()
